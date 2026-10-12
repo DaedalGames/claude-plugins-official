@@ -887,6 +887,18 @@ _ENCRYPTED_DATA_EXTENSIONS = frozenset((
 ))
 
 
+# Paths skipped as secret-shaped during this hook run. The Stop hook reports
+# the count (never the names) so the skip can be watched in telemetry.
+_secret_shaped_skipped = set()
+
+
+def _skip_secret_shaped(file_path):
+    if not _is_secret_shaped(file_path):
+        return False
+    _secret_shaped_skipped.add(file_path)
+    return True
+
+
 def _is_secret_shaped(file_path):
     base = os.path.basename(file_path.replace("\\", "/")).lower()
     target = base
@@ -992,7 +1004,7 @@ def _is_reviewable_source(file_path):
     norm = "/" + file_path.replace("\\", "/")
     if any(("/" + p) in norm for p in SKIP_PATH_PATTERNS):
         return False
-    if _is_secret_shaped(file_path):
+    if _skip_secret_shaped(file_path):
         return False
     if file_path.endswith(SKIP_FILE_SUFFIXES):
         return False
@@ -1043,7 +1055,7 @@ def extract_file_paths_from_diff(diff_output):
         if not header_match:
             continue
         file_path = header_match.group(2) or header_match.group(1) or ''
-        if not _is_reviewable_source(file_path) or _is_secret_shaped(header_match.group(1)):
+        if not _is_reviewable_source(file_path) or _skip_secret_shaped(header_match.group(1)):
             continue
         paths.append(file_path)
 
@@ -1076,7 +1088,7 @@ def parse_diff_into_files(diff_output):
 
         # Filter to source code files only. A rename away from a secret-shaped
         # name still carries the secret's content, so the old name counts too.
-        if not _is_reviewable_source(file_path) or _is_secret_shaped(header_match.group(1)):
+        if not _is_reviewable_source(file_path) or _skip_secret_shaped(header_match.group(1)):
             continue
 
         # Extract the diff content (from first @@ onwards)
