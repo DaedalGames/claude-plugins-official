@@ -1,7 +1,7 @@
 import os
 import time
 
-from conftest import make_repo, run_hook, stop_payload, ups_payload
+from conftest import make_repo, metrics_of, run_hook, stop_payload, ups_payload
 
 import diffstate
 
@@ -67,13 +67,16 @@ def test_stop_hook_does_not_re_review_files_past_the_cap(tmp_path, hook_env, stu
     """More untracked files than the snapshot holds: the same old files must
     not be sent for review turn after turn (#6407)."""
     repo = make_repo(tmp_path / "repo")
-    for i in range(diffstate.UNTRACKED_BASELINE_CAP + 60):
+    n_files = diffstate.UNTRACKED_BASELINE_CAP + 60
+    for i in range(n_files):
         (repo / f"old_{i:05d}.py").write_text(SRC)
     time.sleep(2.2)  # older than the snapshot by more than the timestamp slack
 
     for _turn in range(2):
         run_hook(ups_payload(repo), hook_env)
-        run_hook(stop_payload(repo), hook_env)
+        _rc, stdout, _err = run_hook(stop_payload(repo), hook_env)
+        # Telemetry: a count above the cap is how this path shows up.
+        assert metrics_of(stdout)["preexisting_untracked_excluded"] == n_files
     assert stub_api.calls == []
 
     run_hook(ups_payload(repo), hook_env)
