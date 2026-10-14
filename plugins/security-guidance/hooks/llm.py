@@ -20,11 +20,14 @@ Two reassignable globals here are read by handlers in
 import glob
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
 import tempfile
+import threading
 import time
+import traceback
 import urllib.request
 from typing import Optional, Tuple, Dict, Any, List
 
@@ -153,6 +156,24 @@ CLAUDE_CODE_SYSTEM_PROMPT = "You are a Claude agent, built on Anthropic's Claude
 # each call. None = no error; int = HTTP status code; -1 = network/timeout;
 _last_call_claude_http_error = None
 
+# Outcome of this thread's last analyze_code_security call. Per thread because
+# the commit review's race runs that call on a thread of its own.
+_review_status = threading.local()
+
+
+def last_review_failed() -> bool:
+    """True when this thread's last analyze_code_security call got no verdict
+    from the model (every call failed, or the reply could not be read), which
+    a caller must not treat as "nothing found"."""
+    return getattr(_review_status, "failed", False)
+
+
+def last_review_status() -> Optional[int]:
+    """A copy of the module-wide _last_call_claude_http_error, taken when this
+    thread's last analyze_code_security call got no verdict (an overlapping call
+    on another thread can change the global); None if the reply was unreadable."""
+    return getattr(_review_status, "status", None)
+
 
 # =====================================================================
 # Outbound connectivity probe
@@ -267,6 +288,38 @@ def _cap_files_for_prompt(files):
 _auth_prefer_token = False
 
 
+# A valid HTTP header name (an RFC 9110 token).
+_HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
+_custom_header_lines_skipped = set()
+
+
+def _custom_headers() -> List[Tuple[str, str]]:
+    """ANTHROPIC_CUSTOM_HEADERS as (name, value) pairs, parsed the way Claude
+    Code parses it: one `Name: Value` per line, split at the first colon,
+    trimmed, lines with no name dropped. Lines http.client cannot send (an
+    invalid name, a carriage return or non-Latin-1 text in the value) are
+    skipped. Values are never logged: they are often credentials."""
+    pairs = []
+    raw = os.environ.get("ANTHROPIC_CUSTOM_HEADERS", "")
+    for number, line in enumerate(re.split(r"\r?\n", raw), 1):
+        name, sep, value = line.partition(":")
+        name, value = name.strip(), value.strip()
+        if not sep or not name:
+            continue
+        try:
+            value.encode("latin-1")
+            sendable = bool(_HEADER_NAME.fullmatch(name)) and "\r" not in value
+        except UnicodeEncodeError:
+            sendable = False
+        if not sendable:
+            if number not in _custom_header_lines_skipped:
+                _custom_header_lines_skipped.add(number)
+                debug_log(f"ANTHROPIC_CUSTOM_HEADERS: skipped line {number}, not a valid HTTP header")
+            continue
+        pairs.append((name, value))
+    return pairs
+
+
 def _build_auth_headers(use_token, betas=("structured-outputs-2025-11-13",)):
     betas = list(betas)
     headers = {
@@ -278,6 +331,18 @@ def _build_auth_headers(use_token, betas=("structured-outputs-2025-11-13",)):
         betas.append("oauth-2025-04-20")
     else:
         headers["x-api-key"] = ANTHROPIC_API_KEY
+    for name, value in _custom_headers():
+        lowered = name.lower()
+        if lowered == "anthropic-beta":
+            # Not sent: the review needs none of the user's betas, and Claude
+            # Code drops anthropic-beta lines when the organization's
+            # compliance policy disables experimental betas.
+            continue
+        # As in Claude Code, a custom line wins over a header of the same
+        # name that the plugin set, including the credential header.
+        for existing in [k for k in headers if k.lower() == lowered]:
+            del headers[existing]
+        headers[name] = value
     if betas:
         headers["anthropic-beta"] = ",".join(betas)
     return headers
@@ -546,6 +611,7 @@ def _call_claude_via_sdk(prompt, output_schema, *, max_tokens=16000, model=None)
             _record_http_error(-1)
             return None
 
+    _send_sdk_logs_to_debug_log()
     cli_path = os.environ.get("SG_AGENTIC_CLI_PATH") or None
     default_model = default_review_model()
     chosen_model = model or default_model
@@ -1111,7 +1177,11 @@ def analyze_code_security(files: List[Tuple[str, str]], is_diff: bool = False, p
     previous_findings: list of category strings from earlier stop hook firings this turn,
         used to prompt the reviewer to verify those issues were actually fixed.
     Returns (formatted guidance string or None, list of vuln dicts with severity/category).
+    Also returns (None, []) when the model gave no verdict; last_review_failed()
+    tells the two apart.
     """
+    _review_status.failed = False
+    _review_status.status = None
     if not HAS_API_CREDENTIALS or not files:
         return None, []
 
@@ -1229,11 +1299,21 @@ Respond with a JSON object. If vulnerabilities are found, set hasVulnerabilities
     }
 
     prompt += extensibility.guidance_block()
-    analysis = _call_claude_dual_or(prompt, output_schema,
-                                    bool_key="hasVulnerabilities",
-                                    list_key="vulnerabilities",
-                                    cacheable_prefix=_CODE_REVIEW_RUBRIC)
-    if not analysis or not analysis.get("hasVulnerabilities") or not analysis.get("vulnerabilities"):
+    try:
+        analysis = _call_claude_dual_or(prompt, output_schema,
+                                        bool_key="hasVulnerabilities",
+                                        list_key="vulnerabilities",
+                                        cacheable_prefix=_CODE_REVIEW_RUBRIC)
+    except Exception as e:
+        debug_log(f"LLM code review: call raised {type(e).__name__}: {e}")
+        analysis = None
+    # A reply without the schema's required flag is not a verdict either.
+    if not isinstance(analysis, dict) or "hasVulnerabilities" not in analysis:
+        _review_status.failed = True
+        _review_status.status = _last_call_claude_http_error
+        debug_log("LLM code review: no verdict from the model")
+        return None, []
+    if not analysis.get("hasVulnerabilities") or not analysis.get("vulnerabilities"):
         debug_log("LLM code review: no vulnerabilities found")
         return None, []
 
@@ -1277,6 +1357,32 @@ def _agentic_commit_review_enabled() -> bool:
 _AGENTIC_INVESTIGATE_SYSTEM = review_api.AGENTIC_INVESTIGATE_SYSTEM
 _FINDINGS_SCHEMA = review_api.FINDINGS_SCHEMA
 _SURVIVED_SCHEMA = review_api.SURVIVED_SCHEMA
+
+
+class _DebugLogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            text = record.getMessage()
+            if record.exc_info:
+                text += " | " + "".join(
+                    traceback.format_exception_only(*record.exc_info[:2])).strip()
+        except Exception:
+            return  # never handleError(): it prints to stderr
+        debug_log(f"agent sdk: {text}")
+
+
+_sdk_log_lock = threading.Lock()
+
+
+def _send_sdk_logs_to_debug_log() -> None:
+    """Route the Agent SDK's own log records to the debug log, and stop them
+    propagating. With no handler, Python prints its errors to this hook's
+    stderr, which Claude Code shows Claude as the review notice."""
+    sdk_logger = logging.getLogger("claude_agent_sdk")
+    with _sdk_log_lock:
+        if not any(isinstance(h, _DebugLogHandler) for h in sdk_logger.handlers):
+            sdk_logger.addHandler(_DebugLogHandler())
+            sdk_logger.propagate = False
 
 
 def _agentic_spawn_env() -> Dict[str, str]:
@@ -1377,6 +1483,7 @@ def agentic_review(
             debug_log(f"agentic_review: SDK unavailable ({e}); falling back")
             return None, [], {"agentic_fallback": f"import:{type(e).__name__}"}
 
+    _send_sdk_logs_to_debug_log()
     # Overridable via SG_AGENTIC_MODEL.
     model = os.environ.get("SG_AGENTIC_MODEL") or _CLI_OPUS_ALIAS
     max_turns = int(os.environ.get("SG_AGENTIC_MAX_TURNS", "18"))
@@ -1461,6 +1568,17 @@ def agentic_review(
         except Exception:
             pass
 
+    # Without a callback the inner CLI writes to this hook's stderr, which
+    # Claude Code shows Claude as the review notice. Log it instead.
+    child_stderr_lines = [0]
+
+    def _on_child_stderr(line: str) -> None:
+        child_stderr_lines[0] += 1
+        if child_stderr_lines[0] <= 20:
+            debug_log(f"agentic reviewer's CLI stderr | {str(line).rstrip()}")
+        elif child_stderr_lines[0] == 21:
+            debug_log("agentic reviewer's CLI stderr | (further lines not logged)")
+
     async def _arun(system: str, prompt: str, *, schema: Dict[str, Any],
                     turns: Optional[int] = None
                     ) -> Tuple[Optional[Dict[str, Any]], int, Optional[str]]:
@@ -1517,6 +1635,7 @@ def agentic_review(
             # the review run end-to-end; the others are belt-and-suspenders
             # for the same fd-passing pattern.
             env=_agentic_spawn_env(),
+            stderr=_on_child_stderr,
         )
         n = 0
         structured: Optional[Dict[str, Any]] = None
