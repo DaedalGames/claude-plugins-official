@@ -3,7 +3,7 @@ name: siege
 description: "Work on one hard mathematics problem in rounds: each round a judge writes a few self-contained questions, independent workers answer them, and the judge keeps a ledger of what is proved, refuted and open, until the judge concludes or the rounds run out, and then a proof.md says plainly what is and is not proved. A run takes hours and dozens of worker runs. Usage: /math-proof:siege [NAME=value settings] <the problem, stated in full, or the path of a file holding it>."
 argument-hint: "[NAME=value ...] [DIR=run-directory] <problem statement | problem-file>"
 disable-model-invocation: true
-disallowed-tools: WebSearch, WebFetch, AskUserQuestion
+disallowed-tools: AskUserQuestion
 allowed-tools: Read, Write, Edit, Glob, Grep, Agent, Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/ledger.py *), Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/siege/scripts/ledger.py *), Bash(python ${CLAUDE_SKILL_DIR}/scripts/ledger.py *), Bash(python ${CLAUDE_PLUGIN_ROOT}/skills/siege/scripts/ledger.py *), Bash(mkdir *), Bash(cp *), Bash(mv *), Bash(cat *), Bash(test *), Bash(ls *), Bash(wc *), Bash(cmp *), Bash(grep *), Bash(printf *), Bash(echo *)
 ---
 
@@ -576,10 +576,10 @@ them (settling it for part of the objects only is not a reduction). Do not spend
 polishing, re-deriving or verifying results that do not complete the [GOAL] chain — the proof-writing steps
 after the rounds do that, with their own query budget — so the only verify queries in a round are the audit
 rule's (the verify queries certifying a goal that was proved and then raised count as the audit rule's) and
-the one chain check item (c) allows. Do not spend a query asking an engine to recall or reconstruct a
-proof from the literature, of the [GOAL] claim or of anything else: the engines have no library to consult, and
-such a task gives them nothing to reason with (invoking known theorems inside an attack is another matter, and
-fine). (Only in the final two rounds — this brief's opening 'Step: plan round …' line will then say so
+the one chain check item (c) allows. Do not spend a query asking an engine to recall or reconstruct a published
+proof from memory, of the [GOAL] claim or of anything else: such a task gives it nothing to reason with (invoking
+known theorems inside an attack is another matter, and fine; and if you have web search the engines have it too,
+so a query may ask for the exact published statement of a result the chain needs). (Only in the final two rounds — this brief's opening 'Step: plan round …' line will then say so
 explicitly, in the words "one further round" or "the final round"; if it carries neither, this is not one of
 them — up to two queries may instead verify, or write up in full, the standing results the final document will
 present.) (b) Closing rule.
