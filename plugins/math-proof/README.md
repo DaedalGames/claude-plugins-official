@@ -39,8 +39,9 @@ memory: read it critically. Full instructions:
 /plugin install math-proof@claude-plugins-official
 ```
 
-Needs Claude Code 2.1.280 or later and, for `siege`, Python 3.7 or later on
-your PATH as `python3` or `python` (no extra packages). Then add this `"env"`
+Needs Claude Code 2.1.280 or later and Python 3.7 or later on your PATH as
+`python3` or `python` (no extra packages): `siege`'s bookkeeping script needs
+it, and both skills run short computations with it. Then add this `"env"`
 block once to `~/.claude/settings.json` (or to `.claude/settings.json` in the
 directory you run from, to limit it to that directory). The four lines allow
 long responses, keep sub-agents in the foreground by turning background tasks
@@ -71,13 +72,12 @@ claude --model claude-opus-5-5 --effort high
 
 or `/math-proof:siege <…>` likewise. `solo` writes under `./math-proof-solo/`,
 `siege` under `./math-proof-run/`; the session says where `proof.md` is when it
-finishes. In the default permission mode Claude Code asks you to approve file
-writes, web searches and fetches, and the `siege` judge's shell commands
-(short Python checks and file copies), so stay within reach or use the
-unattended form below; other than that, type nothing while it runs. While
-`siege` runs, `state.md` in the run folder shows the current round, and if
-the judge proves its goal and goes after a stronger one, the result already
-proved is copied to `result-so-far.md`.
+finishes. In the default permission mode Claude Code stops to ask before web
+searches and fetches, before each Python computation and before some file
+operations, so stay within reach or use the unattended form below; other than
+that, type nothing while it runs. While `siege` runs, `state.md` in the run
+folder shows the current round, and if the judge proves its goal and goes
+after a stronger one, the result already proved is copied to `result-so-far.md`.
 
 If a run stops (an error, a closed terminal, a usage limit, Ctrl-C), give the
 same `/math-proof:…` line again in the same directory, not a free-form message:
@@ -102,12 +102,13 @@ claude -p "/math-proof:siege problem.md" --model claude-opus-5-5 --effort high \
 With an API key, adding `--max-budget-usd <amount>` to that `-p` command stops
 the run once that much has been spent; giving the command again resumes it.
 
-**Caution:** `siege`'s judge has Claude Code's shell tool on your machine (it
-is told to use it only for short Python checks and file handling) and, with the
-web tools on, both skills read text fetched from the internet, which could steer
-what the model does. Use `--dangerously-skip-permissions` only in a disposable
-container or VM that holds nothing you would mind leaking, as a non-root user;
-otherwise approve commands and web access by hand. Adding
+**Caution:** both skills give the model Claude Code's shell tool on your machine
+(it is told to use it only for short Python computations and file handling)
+and, with the web tools on, have it read text fetched from the internet, which
+could steer what it runs. Use `--dangerously-skip-permissions` only in a
+disposable container or VM that holds nothing you would mind leaking, as a
+non-root user; otherwise stay in the default permission mode, which asks before
+Python computations and web access. Adding
 `--disallowedTools WebSearch,WebFetch` at the end of the `claude` command turns
 the two web tools off for that run.
 
