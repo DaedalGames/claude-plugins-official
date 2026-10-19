@@ -49,6 +49,17 @@ def sdk_package_dirs(state):
             if "claude_agent_sdk" in dirs]
 
 
+def reviewer_import(label, plugin, state):
+    """Import the SDK the way the plugin's reviewer does (its own path setup,
+    which also handles pywin32's .pth files on Windows)."""
+    code = ("import sys; sys.path.insert(0, sys.argv[1]); import llm, _base; "
+            "llm._inject_agent_sdk_venv_into_syspath(_base.state_dir()); "
+            "from claude_agent_sdk import query; print('import ok')")
+    r = subprocess.run([sys.executable, "-c", code, os.path.join(plugin, "hooks")],
+                       capture_output=True, text=True, env=bootstrap_env(state))
+    print("%s: %s" % (label, (r.stdout + r.stderr).strip().splitlines()[-1:]))
+
+
 print("## a. whole plugin switched off")
 off = os.path.join(WORK, "off")
 run("pull request, SECURITY_GUIDANCE_DISABLE=1", PR, off, 10, {"SECURITY_GUIDANCE_DISABLE": "1"})
@@ -72,12 +83,7 @@ print("files removed:", removed)
 run("main on the emptied install", MAIN, state, "1 (the bug)")
 run("pull request on the emptied install", PR, state, "2 with sdk_venv_emptied 1")
 run("pull request again", PR, state, 1)
-for package in sdk_package_dirs(state):
-    site = os.path.dirname(package)
-    r = subprocess.run([sys.executable, "-c",
-                        "import sys; sys.path.insert(0, sys.argv[1]); from claude_agent_sdk import query; print('import ok')",
-                        site], capture_output=True, text=True)
-    print("import from %s: %s" % (site, (r.stdout + r.stderr).strip().splitlines()[-1:]))
+reviewer_import("reviewer import after the rebuild", PR, state)
 
 print("\n## d. review switched off: is the bootstrap still started from a tool hook")
 payload = json.dumps({"session_id": "s", "hook_event_name": "PostToolUse", "tool_name": "Write",
@@ -106,5 +112,9 @@ outcome = run("pull request, 10 s after the kill", PR, killed, "2, or 5 while a 
 if outcome == 5:
     print("waiting 6 minutes for the cooldown")
     time.sleep(365)
-    outcome = run("pull request, 6 minutes later", PR, killed, 2)
+    # The kill ends the bootstrap script only. Killed while it creates the venv,
+    # the next run rebuilds (2). Killed while pip runs, pip finishes the install
+    # by itself and the next run finds it complete (1).
+    outcome = run("pull request, 6 minutes later", PR, killed, "2, or 1 when pip was already running")
 run("pull request, once more", PR, killed, 1)
+reviewer_import("reviewer import after the killed install", PR, killed)
