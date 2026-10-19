@@ -12,6 +12,12 @@ on:
 
 permissions:
   contents: read
+  actions: read
+
+env:
+  # A push whose commit message contains [report] skips the suite and prints
+  # the results of this earlier run instead.
+  REPORT_RUN_ID: '39319549960'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,6 +26,7 @@ concurrency:
 jobs:
   suite:
     name: ${{ matrix.ref }} on ${{ matrix.os }}
+    if: ${{ !contains(github.event.head_commit.message, '[report]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -153,6 +160,7 @@ jobs:
           echo 'import sys; print(sys.version)' > "$T/hello.py"
           echo "interpreters in /usr/bin and /bin: $(ls /usr/bin/python3* /bin/python3* 2>/dev/null | tr '\n' ' ')"
           set +e
+          mkdir -p "$RUNNER_TEMP/results"
           for round in "python3 (3.9) and python3.14" "plus python3.12"; do
             echo "== on PATH: $round"
             for t in base main pr; do
@@ -160,18 +168,27 @@ jobs:
               echo "$t: exit=$? $out"
             done
             cp "$B/python3.14" "$B/python3.12"
-          done
+          done 2>&1 | tee "$RUNNER_TEMP/results/launcher-choice.txt"
 
       - name: Real SDK installs
         env:
           PYTHONUTF8: '1'
         run: |
+          mkdir -p "$RUNNER_TEMP/results"
           python harness/.github/scripts/sg_platform_sdk_bootstrap.py \
-            main/plugins/security-guidance pr/plugins/security-guidance
+            main/plugins/security-guidance pr/plugins/security-guidance 2>&1 \
+            | tee "$RUNNER_TEMP/results/sdk-bootstrap.txt"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk-${{ matrix.os }}
+          path: ${{ runner.temp }}/results
+          if-no-files-found: warn
 
   compare:
     name: Compare with main
-    needs: suite
+    needs: [suite, sdk-bootstrap]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -179,5 +196,23 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: results
+      - uses: actions/download-artifact@v4
+        if: ${{ contains(github.event.head_commit.message, '[report]') }}
+        with:
+          path: results
+          pattern: results-*
+          run-id: ${{ env.REPORT_RUN_ID }}
+          github-token: ${{ github.token }}
       - name: Table
-        run: python3 .github/scripts/sg_platform_compare.py results | tee -a "$GITHUB_STEP_SUMMARY"
+        run: python3 .github/scripts/sg_platform_compare.py results | tee report.md | tee -a "$GITHUB_STEP_SUMMARY"
+      # The report again as annotations, ten to a step, for reading through the API.
+      - name: Report part 1
+        run: python3 .github/scripts/sg_platform_annotate.py report.md 0
+      - name: Report part 2
+        run: python3 .github/scripts/sg_platform_annotate.py report.md 10
+      - name: Report part 3
+        run: python3 .github/scripts/sg_platform_annotate.py report.md 20
+      - name: Report part 4
+        run: python3 .github/scripts/sg_platform_annotate.py report.md 30
+      - name: Report part 5
+        run: python3 .github/scripts/sg_platform_annotate.py report.md 40

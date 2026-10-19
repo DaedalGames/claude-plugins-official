@@ -28,7 +28,7 @@ def read_suite(folder):
 
 def read_text(folder, name):
     try:
-        with open(os.path.join(folder, name)) as handle:
+        with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as handle:
             return handle.read().strip()
     except OSError:
         return "?"
@@ -41,6 +41,10 @@ def main(root):
             continue
         image, _, ref = entry[len("results-"):].rpartition("-")
         trees.setdefault(image, {})[ref] = os.path.join(root, entry)
+    for entry in sorted(os.listdir(root)):
+        if entry.startswith("sdk-"):
+            for name in ("launcher-choice.txt", "sdk-bootstrap.txt"):
+                print("\n## %s: %s\n\n```\n%s\n```" % (entry[len("sdk-"):], name, read_text(os.path.join(root, entry), name)))
     for image, refs in trees.items():
         base = read_suite(refs["main"]) if "main" in refs else None
         print("\n## %s\n" % image)
