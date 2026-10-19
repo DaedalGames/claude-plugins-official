@@ -6,9 +6,11 @@ import xml.etree.ElementTree as ET
 
 
 SKIP_REASONS = {}
+FAILURE_TEXT = {}
 # Trees whose behaviour-check output is printed: main and the pull requests the checks were written for.
 EXTRAS_FOR = {"main", "6628", "6721", "6722", "6807", "6808"}
 LATER = []
+FIRST = []
 
 
 def read_suite(folder):
@@ -19,8 +21,10 @@ def read_suite(folder):
     for case in ET.parse(path).getroot().iter("testcase"):
         name = "%s::%s" % (case.get("classname", ""), case.get("name", ""))
         skipped = case.find("skipped")
-        if case.find("failure") is not None or case.find("error") is not None:
+        failure = case.find("failure") if case.find("failure") is not None else case.find("error")
+        if failure is not None:
             outcomes[name] = "failed"
+            FAILURE_TEXT[(folder, name)] = (failure.text or failure.get("message", ""))[-1400:]
         elif skipped is not None:
             outcomes[name] = "skipped"
             SKIP_REASONS[name] = skipped.get("message", "")
@@ -85,6 +89,14 @@ def main(root):
             elif added:
                 marked = ["%s%s" % (n, "" if n in base else " (new test)") for n in added]
                 details.append((ref, marked))
+                seen = set()
+                for name in added:
+                    text = FAILURE_TEXT.get((refs[ref], name), "")
+                    last = text.strip().splitlines()[-1:] or [""]
+                    if last[0][:60] not in seen:
+                        seen.add(last[0][:60])
+                        FIRST.append("\n## %s, %s: `%s` (end of the failure text)\n\n```\n%s\n```"
+                                     % (image, ref, name, text))
             if base is not None and ref != "main":
                 per_file = {}
                 for name, outcome in suite.items():
@@ -114,7 +126,7 @@ def main(root):
             if ref in EXTRAS_FOR:
                 LATER.append("\n## %s, %s: behaviour checks\n\n```\n%s\n```"
                              % (image, ref, read_text(refs[ref], "extras.txt")))
-    print("\n".join(LATER))
+    print("\n".join(FIRST + LATER))
 
 
 if __name__ == "__main__":
