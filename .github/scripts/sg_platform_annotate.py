@@ -2,11 +2,11 @@
 """Print ten chunks of a text file as notice annotations, starting at chunk N."""
 import sys
 
-CHUNK = 6000
+CHUNK = 3600  # an annotation keeps 4096 bytes
 lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
 chunks, current = [], ""
 for line in lines:
-    if current and len(current) + len(line) + 1 > CHUNK:
+    if current and len((current + line).encode("utf-8")) + 1 > CHUNK:
         chunks.append(current)
         current = ""
     current += line[:CHUNK] + "\n"

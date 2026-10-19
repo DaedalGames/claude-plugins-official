@@ -6,6 +6,9 @@ import xml.etree.ElementTree as ET
 
 
 SKIP_REASONS = {}
+# Trees whose behaviour-check output is printed: main and the pull requests the checks were written for.
+EXTRAS_FOR = {"main", "6628", "6721", "6722", "6807", "6808"}
+LATER = []
 
 
 def read_suite(folder):
@@ -26,6 +29,12 @@ def read_suite(folder):
     return outcomes
 
 
+def module_of(name):
+    """tests.test_x.TestY::test_z -> test_x; a module-level skip has no class part."""
+    parts = [p for p in name.replace("::", ".").split(".") if p.startswith("test_")]
+    return parts[0] if parts else name
+
+
 def read_text(folder, name):
     try:
         with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as handle:
@@ -44,17 +53,21 @@ def main(root):
     for entry in sorted(os.listdir(root)):
         if entry.startswith("sdk-"):
             for name in ("launcher-choice.txt", "sdk-bootstrap.txt"):
-                print("\n## %s: %s\n\n```\n%s\n```" % (entry[len("sdk-"):], name, read_text(os.path.join(root, entry), name)))
+                LATER.append("\n## %s: %s\n\n```\n%s\n```" % (entry[len("sdk-"):], name, read_text(os.path.join(root, entry), name)))
     for image, refs in trees.items():
         base = read_suite(refs["main"]) if "main" in refs else None
         print("\n## %s\n" % image)
-        print("| Tree | Commit | Passed | Failed | Skipped | Launch exit | Fails here, not on main |")
-        print("|---|---|---|---|---|---|---|")
+        print("| Tree | Commit | Passed | Failed | Skipped | Launch exit | Five launches | Fails here, not on main |")
+        print("|---|---|---|---|---|---|---|---|")
         details, extra, skips = [], [], {}
+        base_modules = {module_of(n) for n in base or {}}
         for ref in sorted(refs, key=lambda r: (r != "main", r)):
             suite = read_suite(refs[ref])
             sha = read_text(refs[ref], "sha")[:8]
             launch = read_text(refs[ref], "launch.exit")
+            timing = [ln.split(": ")[1] for ln in read_text(refs[ref], "launch.txt").splitlines()
+                      if ln.startswith("five launches")]
+            launch = "%s | %s" % (launch, timing[0] if timing else "?")
             if suite is None:
                 print("| %s | %s | no result | | | %s | |" % (ref, sha, launch))
                 continue
@@ -75,8 +88,8 @@ def main(root):
             if base is not None and ref != "main":
                 per_file = {}
                 for name, outcome in suite.items():
-                    module = name.split("::")[0].split(".")[1]
-                    if not any(n.split("::")[0].split(".")[1] == module for n in base):
+                    module = module_of(name)
+                    if module not in base_modules:
                         per_file.setdefault(module, {"passed": 0, "failed": 0, "skipped": 0})[outcome] += 1
                 for module, tally in sorted(per_file.items()):
                     extra.append("- %s adds `%s`: %d passed, %d failed, %d skipped"
@@ -95,10 +108,13 @@ def main(root):
             for text, where in sorted(skips.items()):
                 print("- `%s` (%s)" % (text, ", ".join(where)))
         for ref in sorted(refs, key=lambda r: (r != "main", r)):
-            for title, name in (("launcher", "launch.txt"), ("behaviour checks", "extras.txt")):
-                text = read_text(refs[ref], name)
-                if text != "?":
-                    print("\n<details><summary>%s: %s</summary>\n\n```\n%s\n```\n</details>" % (ref, title, text))
+            if read_text(refs[ref], "launch.exit") != "0" or ref == "main":
+                print("\n**%s launcher**\n\n```\n%s\n```" % (ref, read_text(refs[ref], "launch.txt")))
+        for ref in sorted(refs, key=lambda r: (r != "main", r)):
+            if ref in EXTRAS_FOR:
+                LATER.append("\n## %s, %s: behaviour checks\n\n```\n%s\n```"
+                             % (image, ref, read_text(refs[ref], "extras.txt")))
+    print("\n".join(LATER))
 
 
 if __name__ == "__main__":

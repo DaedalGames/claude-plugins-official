@@ -18,6 +18,7 @@ env:
   # A push whose commit message contains [report] skips the suite and prints
   # the results of this earlier run instead.
   REPORT_RUN_ID: '39319549960'
+  REPORT_SDK_RUN_ID: '39321754630'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -121,6 +122,7 @@ jobs:
 
   sdk-bootstrap:
     name: SDK bootstrap and launcher on ${{ matrix.os }}
+    if: ${{ !contains(github.event.head_commit.message, '[report]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -194,6 +196,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
+        if: ${{ !contains(github.event.head_commit.message, '[report]') }}
         with:
           path: results
       - uses: actions/download-artifact@v4
@@ -203,7 +206,15 @@ jobs:
           pattern: results-*
           run-id: ${{ env.REPORT_RUN_ID }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        if: ${{ contains(github.event.head_commit.message, '[report]') }}
+        with:
+          path: results
+          pattern: sdk-*
+          run-id: ${{ env.REPORT_SDK_RUN_ID }}
+          github-token: ${{ github.token }}
       - name: Table
+        shell: bash
         run: python3 .github/scripts/sg_platform_compare.py results | tee report.md | tee -a "$GITHUB_STEP_SUMMARY"
       # The report again as annotations, ten to a step, for reading through the API.
       - name: Report part 1
