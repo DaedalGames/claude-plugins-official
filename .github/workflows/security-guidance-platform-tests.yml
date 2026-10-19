@@ -72,7 +72,12 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p "$RUNNER_TEMP/results"
-          python -m pip install -q pytest claude-agent-sdk
+          python -m pip install -q pytest
+          if python -m pip install -q claude-agent-sdk > "$RUNNER_TEMP/sdk-install.txt" 2>&1; then
+            echo "::notice title=agent sdk::installed $(python -m pip show claude-agent-sdk | sed -n 2p)"
+          else
+            echo "::notice title=agent sdk::install failed: $(tail -c 1500 "$RUNNER_TEMP/sdk-install.txt" | tr '\n' ' ')"
+          fi
           python -m pytest -q -p no:cacheprovider tests -rfEs \
             --junitxml="$RUNNER_TEMP/results/junit.xml" -o junit_logging=system-err
 
