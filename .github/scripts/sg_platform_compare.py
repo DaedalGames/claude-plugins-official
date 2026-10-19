@@ -7,6 +7,9 @@ import xml.etree.ElementTree as ET
 
 SKIP_REASONS = {}
 FAILURE_TEXT = {}
+# Failing tests whose whole failure text is printed for every tree.
+FULL_TEXT_FOR = ("test_agentic_commit_review_runs", "test_findings_not_replaced_by_the_inner_cli_warning")
+FULL_TEXT = {}
 # Trees whose behaviour-check output is printed: main and the pull requests the checks were written for.
 EXTRAS_FOR = {"main", "6628", "6721", "6722", "6807", "6808"}
 LATER = []
@@ -27,6 +30,7 @@ def read_suite(folder):
             FAILURE_TEXT[(folder, name)] = (
                 (failure.text or failure.get("message", ""))[-3000:]
                 + "\n--- captured stderr ---\n" + (case.findtext("system-err") or "")[-1500:])
+            FULL_TEXT[(folder, name)] = (failure.text or failure.get("message", ""))[-20000:]
         elif skipped is not None:
             outcomes[name] = "skipped"
             SKIP_REASONS[name] = skipped.get("message", "")
@@ -86,6 +90,10 @@ def main(root):
                 added = [n for n in failed if base.get(n) != "failed"]
                 cell = str(len(added))
             print("| %s | %s | %d | %d | %d | %s | %s |" % (ref, sha, counts[0], counts[1], counts[2], launch, cell))
+            for name in failed:
+                if name.endswith(FULL_TEXT_FOR):
+                    FIRST.append("\n## %s, %s: `%s` (whole failure text)\n\n```\n%s\n```"
+                                 % (image, ref, name, FULL_TEXT.get((refs[ref], name), "")))
             if ref == "main":
                 details.append(("main (baseline failures)", failed))
             elif added:
