@@ -1,8 +1,8 @@
 name: security-guidance platform tests
 
-# Runs the security-guidance plugin's own test suite and its hook launcher on
-# Windows runners, for main and for a list of open pull requests, and prints
-# which failures a pull request adds over main. Triggered by pushes to its own
+# Runs the security-guidance plugin's own test suite, its hook launcher and a
+# few behaviour checks on Windows runners, for main and for a list of open pull
+# requests, and prints which failures a pull request adds over main. Triggered by pushes to its own
 # branch only; it reads the repository and holds no secrets.
 
 on:
@@ -33,7 +33,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          path: harness
+
+      - uses: actions/checkout@v4
+        with:
           ref: ${{ matrix.ref == 'main' && 'main' || format('refs/pull/{0}/head', matrix.ref) }}
+          path: tree
 
       - uses: actions/setup-python@v5
         with:
@@ -42,18 +47,20 @@ jobs:
       - name: Describe the machine
         run: |
           cmd.exe //c ver
+          echo "PROCESSOR_ARCHITECTURE=$PROCESSOR_ARCHITECTURE"
           git --version
           bash --version | head -1
-          git rev-parse HEAD
+          git -C tree rev-parse HEAD
           for p in python3 python py; do
             echo "== $p"
             where "$p" 2>&1 || true
             "$p" --version 2>&1 || true
           done
+          python -c "import platform, sys; print(platform.platform(), platform.machine(), sys.version)"
 
       - name: Plugin test suite
         id: suite
-        working-directory: plugins/security-guidance
+        working-directory: tree/plugins/security-guidance
         continue-on-error: true
         run: |
           mkdir -p "$RUNNER_TEMP/results"
@@ -65,22 +72,38 @@ jobs:
         id: launch
         continue-on-error: true
         run: |
-          R="$PWD/plugins/security-guidance"
+          R="$PWD/tree/plugins/security-guidance"
+          launch() {
+            echo '{"hook_event_name":"UserPromptSubmit","session_id":"platform-test","cwd":"'"$PWD"'","prompt":"hello"}' \
+              | CLAUDE_PLUGIN_ROOT="$R" bash "$@" "$R/hooks/sg-python.sh" "$R/hooks/security_reminder_hook.py"
+          }
           set +e
-          echo '{"hook_event_name":"UserPromptSubmit","session_id":"platform-test","cwd":"'"$PWD"'","prompt":"hello"}' \
-            | CLAUDE_PLUGIN_ROOT="$R" bash -x "$R/hooks/sg-python.sh" "$R/hooks/security_reminder_hook.py" \
-            > "$RUNNER_TEMP/results/launch.out" 2> "$RUNNER_TEMP/results/launch.err"
+          launch -x > "$RUNNER_TEMP/results/launch.out" 2> "$RUNNER_TEMP/results/launch.err"
           code=$?
-          set -e
           echo "$code" > "$RUNNER_TEMP/results/launch.exit"
-          echo "exit=$code"
-          grep -E '^\++ exec|open file|No such file' "$RUNNER_TEMP/results/launch.err" || true
-          cat "$RUNNER_TEMP/results/launch.out"
+          {
+            echo "exit=$code"
+            grep -E '^[+]+ exec|open file|No such file' "$RUNNER_TEMP/results/launch.err"
+            cat "$RUNNER_TEMP/results/launch.out"
+            start=$(date +%s%N)
+            for i in 1 2 3 4 5; do launch > /dev/null 2>&1; done
+            echo "five launches: $(( ($(date +%s%N) - start) / 1000000 )) ms"
+          } 2>&1 | tee "$RUNNER_TEMP/results/launch.txt"
           test "$code" -eq 0
+
+      - name: Behaviour checks
+        if: always()
+        continue-on-error: true
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          python harness/.github/scripts/sg_platform_extras.py tree/plugins/security-guidance \
+            ${{ (matrix.ref == 'main' || matrix.ref == '6807') && '--memory' || '' }} 2>&1 \
+            | tee "$RUNNER_TEMP/results/extras.txt"
 
       - name: Record the commit
         if: always()
-        run: git rev-parse HEAD > "$RUNNER_TEMP/results/sha"
+        run: git -C tree rev-parse HEAD > "$RUNNER_TEMP/results/sha"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -88,6 +111,63 @@ jobs:
           name: results-${{ matrix.os }}-${{ matrix.ref }}
           path: ${{ runner.temp }}/results
           if-no-files-found: warn
+
+  sdk-bootstrap:
+    name: SDK bootstrap and launcher on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 2
+          path: main
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/6608/head
+          path: pr
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Launcher picks a new enough interpreter
+        continue-on-error: true
+        run: |
+          git -C main worktree add -q ../base HEAD^1
+          for t in base main pr; do echo "$t $(git -C $t rev-parse --short HEAD)"; done
+          T="$RUNNER_TEMP/launcher"; B="$T/bin"; mkdir -p "$B"
+          PY="$(cygpath -u "$(python -c 'import sys; print(sys.executable)')")"
+          printf '#!/bin/bash\nif [ "$1" = "-c" ]; then echo 3.9; else echo RAN-3.9; fi\n' > "$B/python3"
+          printf '#!/bin/bash\nexec "%s" "$@"\n' "$PY" > "$B/python3.14"
+          chmod +x "$B"/*
+          echo 'import sys; print(sys.version)' > "$T/hello.py"
+          echo "interpreters in /usr/bin and /bin: $(ls /usr/bin/python3* /bin/python3* 2>/dev/null | tr '\n' ' ')"
+          set +e
+          for round in "python3 (3.9) and python3.14" "plus python3.12"; do
+            echo "== on PATH: $round"
+            for t in base main pr; do
+              out=$(PATH="$B:/usr/bin:/bin" bash "$t/plugins/security-guidance/hooks/sg-python.sh" "$T/hello.py" 2>&1)
+              echo "$t: exit=$? $out"
+            done
+            cp "$B/python3.14" "$B/python3.12"
+          done
+
+      - name: Real SDK installs
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          python harness/.github/scripts/sg_platform_sdk_bootstrap.py \
+            main/plugins/security-guidance pr/plugins/security-guidance
 
   compare:
     name: Compare with main
