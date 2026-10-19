@@ -1,0 +1,103 @@
+name: security-guidance platform tests
+
+# Runs the security-guidance plugin's own test suite and its hook launcher on
+# Windows runners, for main and for a list of open pull requests, and prints
+# which failures a pull request adds over main. Triggered by pushes to its own
+# branch only; it reads the repository and holds no secrets.
+
+on:
+  push:
+    branches:
+      - mhegazy/sg-platform-tests
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    name: ${{ matrix.ref }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+        ref: [main, '6809', '6811', '6810', '6812', '6608', '6628', '6721', '6808', '6807', '6813', '6722']
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref == 'main' && 'main' || format('refs/pull/{0}/head', matrix.ref) }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Describe the machine
+        run: |
+          cmd.exe //c ver
+          git --version
+          bash --version | head -1
+          git rev-parse HEAD
+          for p in python3 python py; do
+            echo "== $p"
+            where "$p" 2>&1 || true
+            "$p" --version 2>&1 || true
+          done
+
+      - name: Plugin test suite
+        id: suite
+        working-directory: plugins/security-guidance
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/results"
+          python -m pip install -q pytest
+          python -m pytest -q -p no:cacheprovider tests -rfEs \
+            --junitxml="$RUNNER_TEMP/results/junit.xml"
+
+      - name: Hook launch through the launcher script
+        id: launch
+        continue-on-error: true
+        run: |
+          R="$PWD/plugins/security-guidance"
+          set +e
+          echo '{"hook_event_name":"UserPromptSubmit","session_id":"platform-test","cwd":"'"$PWD"'","prompt":"hello"}' \
+            | CLAUDE_PLUGIN_ROOT="$R" bash -x "$R/hooks/sg-python.sh" "$R/hooks/security_reminder_hook.py" \
+            > "$RUNNER_TEMP/results/launch.out" 2> "$RUNNER_TEMP/results/launch.err"
+          code=$?
+          set -e
+          echo "$code" > "$RUNNER_TEMP/results/launch.exit"
+          echo "exit=$code"
+          grep -E '^\++ exec|open file|No such file' "$RUNNER_TEMP/results/launch.err" || true
+          cat "$RUNNER_TEMP/results/launch.out"
+          test "$code" -eq 0
+
+      - name: Record the commit
+        if: always()
+        run: git rev-parse HEAD > "$RUNNER_TEMP/results/sha"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-${{ matrix.os }}-${{ matrix.ref }}
+          path: ${{ runner.temp }}/results
+          if-no-files-found: warn
+
+  compare:
+    name: Compare with main
+    needs: suite
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: results
+      - name: Table
+        run: python3 .github/scripts/sg_platform_compare.py results | tee -a "$GITHUB_STEP_SUMMARY"
