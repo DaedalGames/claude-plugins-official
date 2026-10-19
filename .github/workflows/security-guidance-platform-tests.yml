@@ -34,7 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, windows-11-arm]
-        ref: [main, '6628', '6608', '6811wintest']
+        ref: [main, '6811wintest']
     defaults:
       run:
         shell: bash
@@ -72,9 +72,9 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p "$RUNNER_TEMP/results"
-          python -m pip install -q pytest
+          python -m pip install -q pytest claude-agent-sdk
           python -m pytest -q -p no:cacheprovider tests -rfEs \
-            --junitxml="$RUNNER_TEMP/results/junit.xml"
+            --junitxml="$RUNNER_TEMP/results/junit.xml" -o junit_logging=system-err
 
       - name: Hook launch through the launcher script
         id: launch

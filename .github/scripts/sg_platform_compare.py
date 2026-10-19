@@ -24,7 +24,9 @@ def read_suite(folder):
         failure = case.find("failure") if case.find("failure") is not None else case.find("error")
         if failure is not None:
             outcomes[name] = "failed"
-            FAILURE_TEXT[(folder, name)] = (failure.text or failure.get("message", ""))[-1400:]
+            FAILURE_TEXT[(folder, name)] = (
+                (failure.text or failure.get("message", ""))[-3000:]
+                + "\n--- captured stderr ---\n" + (case.findtext("system-err") or "")[-1500:])
         elif skipped is not None:
             outcomes[name] = "skipped"
             SKIP_REASONS[name] = skipped.get("message", "")
