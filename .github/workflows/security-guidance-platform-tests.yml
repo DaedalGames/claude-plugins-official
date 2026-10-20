@@ -34,7 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, windows-11-arm]
-        ref: [main, '6807']
+        ref: [main, '6722', '6604', '6626', '6629', '6591']
     defaults:
       run:
         shell: bash
@@ -111,7 +111,7 @@ jobs:
           PYTHONUTF8: '1'
         run: |
           python harness/.github/scripts/sg_platform_extras.py tree/plugins/security-guidance \
-            ${{ (matrix.ref == 'main' || matrix.ref == '6807') && '--memory' || '' }} 2>&1 \
+            ${{ (matrix.ref == 'main' || matrix.ref == '6591') && '--memory' || '' }} 2>&1 \
             | tee "$RUNNER_TEMP/results/extras.txt"
 
       - name: Record the commit
