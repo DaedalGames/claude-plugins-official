@@ -80,8 +80,7 @@ def workspace(tmp_path):
 class _Stub(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
-        if n:
-            self.rfile.read(n)
+        self.server.bodies.append(self.rfile.read(n).decode("utf-8", "replace") if n else "")
         self.server.calls.append(self.path)
         if self.server.delay:
             time.sleep(self.server.delay)
@@ -112,6 +111,7 @@ class _Stub(http.server.BaseHTTPRequestHandler):
 def stub_api():
     srv = http.server.HTTPServer(("127.0.0.1", 0), _Stub)
     srv.calls = []
+    srv.bodies = []
     srv.status = 200
     srv.delay = 0
     srv.vulns = []

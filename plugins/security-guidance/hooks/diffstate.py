@@ -16,6 +16,7 @@ from gitutil import (
     GIT_CMD,
     _git_dir, _git_toplevel, _git_status_porcelain,
     _git_rev_parse_head, _is_ancestor, _git_name_only, _temp_index,
+    _secret_rename_origins,
 )
 from session_state import with_locked_state
 from extensibility import _same_dir
@@ -833,6 +834,9 @@ def compute_v2_review_set(cwd, baseline_sha, head_at_capture, untracked_at_basel
     # dangling stash SHA was pruned). Either way, don't intersect with ∅ —
     # that would silently zero the review set. Fall back to dirty_now.
     review_set = (dirty_now & changed_since) if changed_since is not None else dirty_now
+    # Kept beside its new name so that the content diff pairs the two.
+    review_set = review_set | {
+        old for new, old in _secret_rename_origins.items() if new in review_set}
 
     review_paths = [os.path.join(repo, p) for p in sorted(review_set)]
     untracked_in_review = sorted(new_untracked & review_set)
