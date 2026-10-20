@@ -59,7 +59,7 @@ def _single_turn(env):
 class TestSessionArgs:
     @pytest.mark.parametrize("value", [None, "", "0", "off"])
     def test_not_saved_by_default(self, monkeypatch, value):
-        monkeypatch.setattr(llm, "_session_flag_rejected", False)
+        monkeypatch.setattr(llm, "_send_session_flag", True)
         if value is None:
             monkeypatch.delenv("SECURITY_GUIDANCE_PERSIST_SESSIONS", raising=False)
         else:
@@ -68,16 +68,18 @@ class TestSessionArgs:
 
     @pytest.mark.parametrize("value", ["1", " on ", "TRUE", "yes"])
     def test_opt_in_keeps_sessions(self, monkeypatch, value):
-        monkeypatch.setattr(llm, "_session_flag_rejected", False)
+        monkeypatch.setattr(llm, "_send_session_flag", True)
         monkeypatch.setenv("SECURITY_GUIDANCE_PERSIST_SESSIONS", value)
         assert llm._reviewer_session_args() == {}
 
-    def test_only_a_rejection_of_this_flag_counts(self, monkeypatch):
-        monkeypatch.setattr(llm, "_session_flag_rejected", False)
-        llm._note_reviewer_stderr("error: unknown option '--other'")
-        assert llm._session_flag_rejected is False
-        llm._note_reviewer_stderr(f"error: unknown option '{FLAG}'")
-        assert llm._session_flag_rejected is True
+    def test_only_a_rejection_of_this_flag_counts(self):
+        assert llm._refused_flags(["error: unknown option '--other'"]) == []
+        assert llm._refused_flags([f"error: unknown option '{FLAG}'"]) == [FLAG]
+
+    def test_left_out_once_refused(self, monkeypatch):
+        monkeypatch.setattr(llm, "_send_session_flag", False)
+        monkeypatch.delenv("SECURITY_GUIDANCE_PERSIST_SESSIONS", raising=False)
+        assert llm._reviewer_session_args() == {}
 
 
 class TestInnerCliArguments:
