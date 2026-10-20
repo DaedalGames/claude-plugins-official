@@ -174,16 +174,21 @@ def _rel_in_repo(real_root, path):
     """`path` relative to the repo root (a real path), or None when it lies
     outside the repo."""
     real = os.path.realpath(path)
+    if sys.platform == "darwin":
+        # git and the file system can spell one name composed and decomposed.
+        real = unicodedata.normalize("NFC", real)
+        real_root = unicodedata.normalize("NFC", real_root)
+    if _FOLD_CASE:
+        # Fold before comparing: realpath keeps the case a path was typed in,
+        # so the repo folder itself can be spelled differently too.
+        real, real_root = real.casefold(), real_root.casefold()
     try:
         rel = os.path.relpath(real, real_root)
     except ValueError:  # another drive
         return None
     if rel == os.pardir or rel.startswith(os.pardir + os.sep):
         return None
-    if sys.platform == "darwin":
-        # git and the file system can spell one name composed and decomposed.
-        rel = unicodedata.normalize("NFC", rel)
-    return rel.casefold() if _FOLD_CASE else rel
+    return rel
 
 
 def touched_scope(repo_root, cwd, touched_paths):

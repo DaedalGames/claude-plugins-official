@@ -210,6 +210,20 @@ class TestRecordReadWhenTheNoteIsWritten:
         assert check([], {"state_resets": 1}) == ([], -1)
         assert check([], {"state_overwrites": 2}) == ([], -1)
 
+    def test_repo_folder_spelled_in_another_case(self, state, monkeypatch):
+        """On a file system that ignores case the edit tool can be given the
+        repo folder, or one above it, in a different case."""
+        repo, check = state
+        monkeypatch.setattr(diffstate, "_FOLD_CASE", True)
+        real = os.path.realpath(str(repo))
+        assert check([os.path.join(real.upper(), "app.py")], {}) == ([], 0)
+        assert check([os.path.join(real.upper(), "APP.PY")], {}) == ([], 0)
+        scope, inside = diffstate.touched_scope(
+            str(repo), str(repo), [os.path.join(real.upper(), "app.py")])
+        assert (scope, inside) == (1, {"app.py"})
+        # A sibling folder is still outside.
+        assert check([os.path.join(real.upper() + "2", "app.py")], {}) == (["app.py"], 1)
+
     def test_reading_does_not_write_the_state_file(self, state, tmp_path):
         _, check = state
         check([], {"touched_paths": []})
