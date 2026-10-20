@@ -48,6 +48,8 @@ def test_stop_review_leaves_the_renamed_file_out(tmp_path, hook_env, stub_api, h
     m = metrics_of(stdout)
     assert m.get("skip_reason") is None, m
     assert m.get("files_reviewed") == 1
+    # A plain mv is not a rename to git: the old name is listed as deleted.
+    assert m.get("secret_renamed") == (None if how == "moved" else 1)
     assert "os.system" in _sent(stub_api)
     assert "SECRET_VALUE" not in _sent(stub_api)
 
@@ -103,3 +105,4 @@ def test_review_set_gains_only_the_origin_of_a_reviewed_file(tmp_path, git_env):
     paths, _base, root, _untracked, metrics = diffstate.compute_v2_review_set(str(repo), None, None, {})
     assert sorted(os.path.relpath(p, root) for p in paths) == ["deploy_rsa", "new.py", "settings.py"]
     assert metrics["dirty_now_count"] == 2 and metrics["review_set_count"] == 3
+    assert metrics["secret_renamed"] == 1
