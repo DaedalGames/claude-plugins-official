@@ -80,7 +80,10 @@ def workspace(tmp_path):
 class _Stub(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
-        self.server.bodies.append(self.rfile.read(n).decode("utf-8", "replace") if n else "")
+        body = self.rfile.read(n).decode("utf-8", "replace") if n else ""
+        # Only the stub_api fixture keeps the request bodies.
+        if hasattr(self.server, "bodies"):
+            self.server.bodies.append(body)
         self.server.calls.append(self.path)
         if self.server.delay:
             time.sleep(self.server.delay)
