@@ -1,6 +1,8 @@
 """A tracked file renamed away from a secret-shaped name stays out of the
 Stop review, however the rename reached git."""
+import errno
 import os
+import subprocess
 
 import pytest
 
@@ -106,3 +108,42 @@ def test_review_set_gains_only_the_origin_of_a_reviewed_file(tmp_path, git_env):
     assert sorted(os.path.relpath(p, root) for p in paths) == ["deploy_rsa", "new.py", "settings.py"]
     assert metrics["dirty_now_count"] == 2 and metrics["review_set_count"] == 3
     assert metrics["secret_renamed"] == 1
+
+
+def test_origin_still_pairs_beside_a_nested_repo_and_a_split_path_list(
+        tmp_path, git_env, monkeypatch):
+    repo = make_repo(tmp_path / "repo", {"deploy_rsa": SECRET_BODY, "app.py": "x = 1\n"})
+    make_repo(repo / "nested", {"inner.py": "y = 1\n"})
+    git(repo, "mv", "deploy_rsa", "settings.py")
+    (repo / "app.py").write_text(EDIT)
+    (repo / "a_much_longer_module_name.py").write_text("y = 1\n")
+    (repo / "another_quite_long_module_name.py").write_text("y = 2\n")
+    for i in range(20):
+        (repo / f"note{i:02d}.txt").write_text("x\n")
+    paths, base, root, untracked, metrics = diffstate.compute_v2_review_set(str(repo), None, None, {})
+    names = [os.path.relpath(p, root) for p in paths]
+    assert "deploy_rsa" in names and "settings.py" in names
+    assert not any(n.startswith("nested") for n in names)
+    assert metrics["secret_renamed"] == 1
+
+    # The OS refuses the one command that holds every path, so the paths go
+    # out in several: the old name has to be in the one with the new name.
+    real_popen = subprocess.Popen
+    limit = sum(len(a) + 1 for a in gitutil.GIT_CMD) + 220
+    diffs = []
+
+    def popen(cmd, *args, **kwargs):
+        if sum(len(a) + 1 for a in cmd) > limit:
+            raise OSError(errno.E2BIG, "Argument list too long")
+        if "diff" in cmd:
+            diffs.append(cmd)
+        return real_popen(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(gitutil, "_MAX_PATH_ARGS_BYTES", 80)
+    diff = gitutil.get_git_diff(root, base, paths=paths, untracked_paths=untracked)
+    assert len(diffs) > 1 and all("deploy_rsa" in c for c in diffs)
+    reviewed = gitutil.parse_diff_into_files(diff)
+    assert sorted(f for f, _ in reviewed) == [
+        "a_much_longer_module_name.py", "another_quite_long_module_name.py", "app.py"]
+    assert "SECRET_VALUE" not in "".join(d for _, d in reviewed)
