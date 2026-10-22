@@ -31,7 +31,8 @@ def _stub_cli(tmp_path, reject_flag=False):
     ) if reject_flag else ""
     cli = write_cli(tmp_path, "claude", (
         "import sys\n"
-        f"with open({str(log)!r}, 'a') as f:\n"
+        # utf-8: the reviewer's prompt has characters cp1252 cannot write.
+        f"with open({str(log)!r}, 'a', encoding='utf-8') as f:\n"
         "    f.write(' '.join(sys.argv[1:]) + '\\n')\n"
         f"{reject}"
         "sys.exit(1)\n"))
@@ -40,7 +41,8 @@ def _stub_cli(tmp_path, reject_flag=False):
 
 def _reviews(log):
     """Argument lines of the review launches (the SDK also probes `-v`)."""
-    return [l for l in log.read_text().splitlines() if "--input-format" in l]
+    return [l for l in log.read_text(encoding="utf-8").splitlines()
+            if "--input-format" in l]
 
 
 @pytest.fixture
