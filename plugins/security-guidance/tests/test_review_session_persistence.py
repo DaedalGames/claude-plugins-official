@@ -7,6 +7,7 @@ import pytest
 
 from conftest import (
     HOOKS_DIR, STUB_VULN, VULN_PY, bash_payload, commit_file, run_hook,
+    write_cli,
 )
 
 import llm
@@ -24,12 +25,16 @@ def _stub_cli(tmp_path, reject_flag=False):
     older than the flag does."""
     log = tmp_path / "inner-cli-launches"
     reject = (
-        f'case " $* " in *" {FLAG} "*) '
-        f'echo "error: unknown option \'{FLAG}\'" >&2; exit 1;; esac\n'
+        f"if {FLAG!r} in sys.argv:\n"
+        f"    sys.stderr.write(\"error: unknown option '{FLAG}'\\n\")\n"
+        "    sys.exit(1)\n"
     ) if reject_flag else ""
-    cli = tmp_path / "claude"
-    cli.write_text(f'#!/bin/sh\necho "$*" >> "{log}"\n{reject}exit 1\n')
-    cli.chmod(0o755)
+    cli = write_cli(tmp_path, "claude", (
+        "import sys\n"
+        f"with open({str(log)!r}, 'a') as f:\n"
+        "    f.write(' '.join(sys.argv[1:]) + '\\n')\n"
+        f"{reject}"
+        "sys.exit(1)\n"))
     return str(cli), log
 
 
