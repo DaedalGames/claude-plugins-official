@@ -1838,6 +1838,9 @@ def _run_inner_cli(start: Callable[[], Any], stderr_lines: List[str]) -> Any:
         return start()
 
 
+_OAUTH_TOKEN_PREFIX = "sk-ant-oat"
+
+
 def _agentic_spawn_env() -> Dict[str, str]:
     """opts.env for the SDK-spawned inner `claude` CLI.
 
@@ -1853,7 +1856,8 @@ def _agentic_spawn_env() -> Dict[str, str]:
     blanking the inherited OAuth token there strands the grandchild with
     zero credentials → ProcessError → agentic silently falls back to
     single-shot on every commit. So forward the OAuth token whenever it
-    is the only credential.
+    is the only credential, as CLAUDE_CODE_OAUTH_TOKEN when it is a
+    claude.ai token.
     """
     env = {
         # Policy settings can enable this plugin inside the reviewing CLI too;
@@ -1885,7 +1889,17 @@ def _agentic_spawn_env() -> Dict[str, str]:
     # No API key — forward the OAuth token from the parent process so the
     # SDK grandchild has credentials. Empty string is fine (the SDK will
     # use whatever auth path is left).
-    env["ANTHROPIC_AUTH_TOKEN"] = os.environ.get("ANTHROPIC_AUTH_TOKEN") or ""
+    token = os.environ.get("ANTHROPIC_AUTH_TOKEN") or ""
+    if token.startswith(_OAUTH_TOKEN_PREFIX):
+        # Given as ANTHROPIC_AUTH_TOKEN, the inner CLI still renews a stored
+        # claude.ai login it does not run on, which can sign the user out.
+        # Given as its OAuth token, it leaves the stored login alone. That
+        # route also turns on 1-hour cache writes, which cost more.
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+        env["ANTHROPIC_AUTH_TOKEN"] = ""
+        env["FORCE_PROMPT_CACHING_5M"] = "1"
+        return env
+    env["ANTHROPIC_AUTH_TOKEN"] = token
     return env
 
 
