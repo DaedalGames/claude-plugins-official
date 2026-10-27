@@ -53,7 +53,7 @@ SECURITY_REVIEW_MODEL=claude-opus-5-5
 The pattern warnings need no credentials. The LLM reviews (the diff review on Stop and the commit/push reviewer) use the first of these that applies:
 
 - **A cloud provider (Bedrock, Vertex, Foundry)** — if Claude Code is configured for one, reviews run through Claude Code with that provider config.
-- **`ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` in the environment** — used as is, against `ANTHROPIC_BASE_URL` if you set one.
+- **`ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` in the environment** — used as is, against `ANTHROPIC_BASE_URL` if you set one. With no base URL, the commit/push reviewer treats a claude.ai token (`sk-ant-oat`) the way it treats a sign-in, below.
 - **Signed in to Claude Code (`/login`)** — Claude Code passes your sign-in to the plugin's hooks, and reviews use that account. The commit/push reviewer's Claude Code runs on that token alone and does not renew the login you have stored.
 - **Signed in to a Claude apps gateway (`/login`)** — Claude Code passes no sign-in to plugins on a gateway, so reviews run through your installed Claude Code, which uses its own stored sign-in. The plugin never reads it. The plugin looks for Claude Code at `~/.local/bin/claude`, where the native installer puts it on macOS and Linux; on Windows, or for any other install, set `SG_AGENTIC_CLI_PATH` to its full path.
 

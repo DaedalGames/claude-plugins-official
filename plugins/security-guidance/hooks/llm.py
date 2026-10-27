@@ -1839,6 +1839,10 @@ def _run_inner_cli(start: Callable[[], Any], stderr_lines: List[str]) -> Any:
 
 
 _OAUTH_TOKEN_PREFIX = "sk-ant-oat"
+# Where a token with that prefix stays in ANTHROPIC_AUTH_TOKEN: a custom base
+# URL means it is a gateway's bearer, bare mode ignores the OAuth variable, and
+# a cloud session has no stored login to protect and rotates its own token.
+_OAUTH_VARIABLE_UNSAFE_ENV = ("ANTHROPIC_BASE_URL", "CLAUDE_CODE_SIMPLE", "CLAUDE_CODE_REMOTE")
 
 
 def _agentic_spawn_env() -> Dict[str, str]:
@@ -1890,15 +1894,16 @@ def _agentic_spawn_env() -> Dict[str, str]:
     # SDK grandchild has credentials. Empty string is fine (the SDK will
     # use whatever auth path is left).
     token = os.environ.get("ANTHROPIC_AUTH_TOKEN") or ""
-    if token.startswith(_OAUTH_TOKEN_PREFIX):
+    if token.startswith(_OAUTH_TOKEN_PREFIX) and not any(
+        os.environ.get(name) for name in _OAUTH_VARIABLE_UNSAFE_ENV
+    ):
         # Given as ANTHROPIC_AUTH_TOKEN, the inner CLI still renews a stored
         # claude.ai login it does not run on, which can sign the user out.
         # Given as its OAuth token, it leaves the stored login alone. That
         # route also turns on 1-hour cache writes, which cost more.
         env["CLAUDE_CODE_OAUTH_TOKEN"] = token
-        env["ANTHROPIC_AUTH_TOKEN"] = ""
         env["FORCE_PROMPT_CACHING_5M"] = "1"
-        return env
+        token = ""
     env["ANTHROPIC_AUTH_TOKEN"] = token
     return env
 
@@ -2095,7 +2100,8 @@ def _agentic_review(
             # env as {**os.environ, **opts.env}, so the inner claude inherits
             # it and prefers it over ANTHROPIC_API_KEY — but some model
             # endpoints reject OAuth bearers (401 → exit 1 → silent
-            # fallback). Override with empty so API-key auth wins.
+            # fallback). Override with empty so API-key auth wins. With no
+            # API key, a claude.ai token moves to CLAUDE_CODE_OAUTH_TOKEN.
             #
             # On CCR (entrypoint=remote*) the daemon passes auth on file
             # descriptors to the top-level claude process; the SDK-spawned
