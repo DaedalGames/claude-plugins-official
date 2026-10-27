@@ -11,7 +11,7 @@ FAILURE_TEXT = {}
 FULL_TEXT_FOR = ("test_agentic_commit_review_runs", "test_findings_not_replaced_by_the_inner_cli_warning")
 FULL_TEXT = {}
 # Trees whose behaviour-check output is printed: main and the pull requests the checks were written for.
-EXTRAS_FOR = {"main", "6628", "6721", "6722", "6807", "6808", "6875"}
+EXTRAS_FOR = {"main", "6628", "6721", "6722", "6807", "6808", "6875", "6922"}
 LATER = []
 FIRST = []
 
