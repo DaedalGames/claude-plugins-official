@@ -3321,7 +3321,7 @@
         "url": "https://github.com/runwayml/skills.git",
         "path": "claude",
         "ref": "main",
-        "sha": "fe79eab0b996df90ff58383077df986b423bc75b"
+        "sha": "6e98d3f3540705331acd748d75427f4bd7c90ce1"
       },
       "homepage": "https://runwayml.com"
     },
